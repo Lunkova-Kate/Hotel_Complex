@@ -205,7 +205,7 @@ class CheckoutForm:
 
 
 class CancelBookingForm:
-    """Форма безопасной отмены бронирования с перехватом триггерных штрафов."""
+    """Форма отмены бронирования."""
 
     def __init__(self, parent, business_logic, on_success=None):
         self.parent = parent
@@ -215,10 +215,13 @@ class CancelBookingForm:
         self.window = tk.Toplevel(parent)
         self.window.title("Отмена бронирования")
 
+        from gui.sizes import CANCEL_BOOKING_FORM
         width = CANCEL_BOOKING_FORM['width']
         height = CANCEL_BOOKING_FORM['height']
         self.window.geometry(f"{width}x{height}")
         self.window.resizable(False, False)
+
+        from gui.utils import center_window
         center_window(self.window, width, height)
 
         self.window.transient(parent)
@@ -230,130 +233,59 @@ class CancelBookingForm:
         main_frame = ttk.Frame(self.window, padding="20")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        tk.Label(main_frame, text="Регистрация нового проживания", font=('Arial', 14, 'bold')).pack(pady=(0, 15))
+        tk.Label(main_frame, text="❌ Отмена существующей брони", font=('Arial', 14, 'bold')).pack(pady=(0, 15))
 
-        #  Блок параметров номера
-        room_frame = ttk.LabelFrame(main_frame, text=" Выбор номера и времени ", padding="10")
-        room_frame.pack(fill=tk.X, pady=5)
+        booking_frame = ttk.LabelFrame(main_frame, text=" Выберите активную бронь ", padding="10")
+        booking_frame.pack(fill=tk.X, pady=5)
 
-        tk.Label(room_frame, text="Свободный номер:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
-        self.room_combo = ttk.Combobox(room_frame, width=40, state="readonly")
-        self.room_combo.grid(row=0, column=1, padx=5, pady=5)
+        tk.Label(booking_frame, text="Бронирование:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
+        self.booking_combo = ttk.Combobox(booking_frame, width=55, state="readonly")
+        self.booking_combo.grid(row=0, column=1, padx=5, pady=5)
 
+        self.booking_mapping = {}
         try:
-            from Data_Acces.db_connection import DatabaseConnection
-            import psycopg2.extras
-
-            with DatabaseConnection() as conn:
-                with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-
-                    cur.execute("""
-                        SELECT r.room_id, r.room_number, b.name AS building_name
-                        FROM room r
-                        JOIN building b ON r.building_id = b.building_id
-                        WHERE NOT EXISTS (
-                            SELECT 1 FROM stay s
-                            WHERE s.room_id = r.room_id
-                              AND (s.checkout_at IS NULL OR s.checkout_at > NOW())
-                        )
-                        AND NOT EXISTS (
-                            SELECT 1 FROM booking_room br
-                            JOIN booking bk ON bk.booking_id = br.booking_id
-                            WHERE br.room_id = r.room_id
-                              AND bk.status = 'ACTIVE'
-                              AND bk.planned_checkin <= CURRENT_DATE
-                              AND bk.planned_checkout > CURRENT_DATE
-                        )
-                        ORDER BY b.name, r.room_number
-                    """)
-                    free_rooms = cur.fetchall()
-
-                    self.room_mapping = {}
-                    combo_values = []
-                    for row in free_rooms:
-                        label = f"Комната №{row['room_number']} ({row['building_name']})"
-                        self.room_mapping[label] = row['room_id']
-                        combo_values.append(label)
-
-                    self.room_combo['values'] = combo_values
-
-                    if not combo_values:
-                        self.room_combo['values'] = ["Нет свободных номеров"]
-
-        except Exception as e:
-            self.room_combo['values'] = [f"Ошибка загрузки: {e}"]
-
-
-        tk.Label(room_frame, text="Дата заезда:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
-        self.checkin_entry = ttk.Entry(room_frame, width=25)
-        self.checkin_entry.insert(0, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-        self.checkin_entry.grid(row=1, column=1, sticky='w', padx=5, pady=5)
-
-
-        guests_frame = ttk.LabelFrame(main_frame, text=" Выберите проживающих гостей из списка ", padding="10")
-        guests_frame.pack(fill=tk.BOTH, expand=True, pady=10)
-
-        self.client_tree = ttk.Treeview(guests_frame, columns=('fio', 'passport'), show='headings', height=8)
-        self.client_tree.heading('fio', text='ФИО Клиента')
-        self.client_tree.heading('passport', text='Паспортные данные')
-        self.client_tree.column('fio', width=300)
-        self.client_tree.column('passport', width=150)
-
-        scroll = ttk.Scrollbar(guests_frame, orient="vertical", command=self.client_tree.yview)
-        self.client_tree.configure(yscrollcommand=scroll.set)
-        self.client_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scroll.pack(side=tk.RIGHT, fill=tk.Y)
-
-        self.client_id_map = {}
-        try:
-            clients = self.bl.get_all('client', limit=300)
-            for c in clients:
-                fio = f"{c['last_name']} {c['first_name']}".strip()
-                row_id = self.client_tree.insert('', tk.END, values=(fio, c['passport_number']))
-                self.client_id_map[row_id] = c['client_id']
-        except Exception as e:
-            print(f"Ошибка заполнения списка гостей: {e}")
-
-        self.client_tree.configure(selectmode='extended')
-        tk.Label(main_frame, text="* Зажмите Ctrl или Shift, чтобы выбрать несколько человек в один номер",
-                 font=('Arial', 8, 'italic'), fg='gray').pack(anchor='w')
-
+            bookings = self.bl.get_all('booking', limit=200)
+            combo_values = []
+            for b in bookings:
+                if b['status'] == 'ACTIVE':
+                    label = f"Бронь №{b['booking_id']} (План заезда: {b['planned_checkin']}) [Мест: {b['people_count']}]"
+                    self.booking_mapping[label] = b['booking_id']
+                    combo_values.append(label)
+            self.booking_combo['values'] = combo_values
+        except Exception:
+            self.booking_combo['values'] = ["Ошибка загрузки списка броней"]
 
         btn_frame = ttk.Frame(main_frame)
-        btn_frame.pack(pady=10)
+        btn_frame.pack(pady=20)
 
-        ttk.Button(btn_frame, text="Заселить", command=self._checkin, width=15).pack(side='left', padx=10)
+        # ВОТ ЗДЕСЬ ИСПРАВЛЕННЫЕ КНОПКИ (вызывают _cancel, а не _checkin)
+        ttk.Button(btn_frame, text="❌ Аннулировать бронь", command=self._cancel, width=20).pack(side='left', padx=10)
         ttk.Button(btn_frame, text="Отмена", command=self.window.destroy, width=15).pack(side='left', padx=10)
 
     def _cancel(self):
         try:
-            selected_booking = self.booking_combo.get()
-            if not selected_booking:
-                raise ValueError("Пожалуйста, выберите бронирование из списка!")
-            booking_id = self.booking_mapping[selected_booking]
+            # Получаем выбранный текст из выпадающего списка
+            selected = self.booking_combo.get()
+            if not selected or "Ошибка" in selected:
+                raise ValueError("Пожалуйста, выберите корректную бронь из списка!")
 
-            result = self.bl.cancel_booking(booking_id)
+            # Достаем реальный ID брони из словаря-маппинга
+            booking_id = self.booking_mapping[selected]
 
-            fee = 0
-            if result and 'cancellation_fee' in result and result['cancellation_fee'] is not None:
-                fee = float(result['cancellation_fee'])
+            # Вызываем обновление статуса в базе данных.
+            self.bl.update('booking', 'booking_id', booking_id, {'status': 'CANCELLED'})
 
-            if fee > 0:
-                messagebox.showwarning("Внимание (Поздняя отмена)",
-                                       f"Бронь аннулирована с нарушением срока (менее чем за 7 дней)!\n"
-                                       f"Автоматически начислен штраф: {fee} руб.\n"
-                                       f"Счёт-фактура сформирован автоматически.", parent=self.window)
-            else:
-                messagebox.showinfo("Успех", "Бронь успешно отменена без штрафных санкций.", parent=self.window)
+            from tkinter import messagebox
+            messagebox.showinfo("Успех", f"Бронь №{booking_id} успешно аннулирована!", parent=self.window)
 
+            # Закрываем окно и обновляем главную таблицу
             self.window.destroy()
             if self.on_success:
                 self.on_success()
 
-        except ValueError as e:
-            messagebox.showerror("Ошибка ввода", str(e), parent=self.window)
         except Exception as e:
-            messagebox.showerror("Ошибка СУБД", f"Не удалось отменить бронь:\n{str(e)}", parent=self.window)
+            from tkinter import messagebox
+            messagebox.showerror("Ошибка", f"Не удалось отменить бронь:\n{e}", parent=self.window)
 
 
 class AddPaymentForm:
