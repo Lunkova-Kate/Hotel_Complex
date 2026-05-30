@@ -213,7 +213,7 @@ class ReportView:
             self.window.clipboard_append(text)
             messagebox.showinfo("Копирование", "Данные скопированы в буфер обмена!")
 
-        ttk.Button(btn_frame, text="📄 Копировать", command=copy_to_clipboard).pack(side='left', padx=10)
+        ttk.Button(btn_frame, text="Копировать", command=copy_to_clipboard).pack(side='left', padx=10)
 
     def _display_tuple_result(self, summary, preferences, parent):
         for widget in parent.winfo_children():

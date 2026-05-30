@@ -33,7 +33,6 @@ class CheckinForm:
 
         tk.Label(main_frame, text="Регистрация нового проживания", font=('Arial', 14, 'bold')).pack(pady=(0, 15))
 
-        #  Блок параметров номера
         room_frame = ttk.LabelFrame(main_frame, text=" Выбор номера и времени ", padding="10")
         room_frame.pack(fill=tk.X, pady=5)
 
@@ -53,7 +52,6 @@ class CheckinForm:
         self.checkin_entry.insert(0, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         self.checkin_entry.grid(row=1, column=1, sticky='w', padx=5, pady=5)
 
-        #  Блок выбора гостей
         guests_frame = ttk.LabelFrame(main_frame, text=" Выберите проживающих гостей из списка ", padding="10")
         guests_frame.pack(fill=tk.BOTH, expand=True, pady=10)
 
@@ -82,7 +80,7 @@ class CheckinForm:
         tk.Label(main_frame, text="* Зажмите Ctrl или Shift, чтобы выбрать несколько человек в один номер",
                  font=('Arial', 8, 'italic'), fg='gray').pack(anchor='w')
 
-        #  Кнопки
+
         btn_frame = ttk.Frame(main_frame)
         btn_frame.pack(pady=10)
 
@@ -233,7 +231,7 @@ class CancelBookingForm:
         main_frame = ttk.Frame(self.window, padding="20")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        tk.Label(main_frame, text="❌ Отмена существующей брони", font=('Arial', 14, 'bold')).pack(pady=(0, 15))
+        tk.Label(main_frame, text="Отмена существующей брони", font=('Arial', 14, 'bold')).pack(pady=(0, 15))
 
         booking_frame = ttk.LabelFrame(main_frame, text=" Выберите активную бронь ", padding="10")
         booking_frame.pack(fill=tk.X, pady=5)
@@ -258,31 +256,33 @@ class CancelBookingForm:
         btn_frame = ttk.Frame(main_frame)
         btn_frame.pack(pady=20)
 
-        # ВОТ ЗДЕСЬ ИСПРАВЛЕННЫЕ КНОПКИ (вызывают _cancel, а не _checkin)
-        ttk.Button(btn_frame, text="❌ Аннулировать бронь", command=self._cancel, width=20).pack(side='left', padx=10)
+        ttk.Button(btn_frame, text="Аннулировать бронь", command=self._cancel, width=20).pack(side='left', padx=10)
         ttk.Button(btn_frame, text="Отмена", command=self.window.destroy, width=15).pack(side='left', padx=10)
 
     def _cancel(self):
         try:
-            # Получаем выбранный текст из выпадающего списка
             selected = self.booking_combo.get()
             if not selected or "Ошибка" in selected:
                 raise ValueError("Пожалуйста, выберите корректную бронь из списка!")
 
-            # Достаем реальный ID брони из словаря-маппинга
             booking_id = self.booking_mapping[selected]
 
-            # Вызываем обновление статуса в базе данных.
-            self.bl.update('booking', 'booking_id', booking_id, {'status': 'CANCELLED'})
+
+            self.bl.cancel_booking(booking_id)
 
             from tkinter import messagebox
             messagebox.showinfo("Успех", f"Бронь №{booking_id} успешно аннулирована!", parent=self.window)
 
-            # Закрываем окно и обновляем главную таблицу
             self.window.destroy()
             if self.on_success:
                 self.on_success()
 
+        except PermissionError as e:
+            from tkinter import messagebox
+            messagebox.showerror("Ошибка доступа", str(e), parent=self.window)
+        except ValueError as e:
+            from tkinter import messagebox
+            messagebox.showerror("Ошибка", str(e), parent=self.window)
         except Exception as e:
             from tkinter import messagebox
             messagebox.showerror("Ошибка", f"Не удалось отменить бронь:\n{e}", parent=self.window)

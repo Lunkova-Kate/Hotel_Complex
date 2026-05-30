@@ -1,4 +1,3 @@
-# gui/query_dialog.py
 import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import datetime
@@ -49,9 +48,10 @@ class QueryDialog:
             'name': 'Информация о номере',
             'func': 'report_room_free_info',
             'params': [
-                {'name': 'room_id', 'label': 'ID номера', 'type': 'int', 'required': True},
+                {'name': 'room_id', 'label': 'Выберите номер', 'type': 'int', 'required': True},
             ]
         },
+
         '6': {
             'name': 'Занятые номера, освобождающиеся к сроку',
             'func': 'report_occupied_rooms_free_by_deadline',
@@ -86,7 +86,7 @@ class QueryDialog:
             'name': 'Сведения о постояльцах из номера',
             'func': 'report_guest_info_by_room',
             'params': [
-                {'name': 'room_id', 'label': 'ID номера', 'type': 'int', 'required': True},
+                {'name': 'room_id', 'label': 'Выберите номер', 'type': 'int', 'required': True},
             ]
         },
         '11': {
@@ -114,14 +114,14 @@ class QueryDialog:
             'name': 'Полная история клиента',
             'func': 'report_client_full_history',
             'params': [
-                {'name': 'client_id', 'label': 'ID клиента', 'type': 'int', 'required': True},
+                {'name': 'client_id', 'label': 'Выберите клиента', 'type': 'int', 'required': True},
             ]
         },
         '15': {
             'name': 'Кто занимал номер в период',
             'func': 'report_room_occupants',
             'params': [
-                {'name': 'room_id', 'label': 'ID номера', 'type': 'int', 'required': True},
+                {'name': 'room_id', 'label': 'Выберите номер', 'type': 'int', 'required': True},
                 {'name': 'start_ts', 'label': 'Начало периода', 'type': 'timestamp', 'required': True},
                 {'name': 'end_ts', 'label': 'Конец периода', 'type': 'timestamp', 'required': True},
             ]
@@ -144,6 +144,10 @@ class QueryDialog:
         if not self.report_info:
             raise ValueError(f"Неизвестный отчёт: {report_id}")
 
+        if not self.report_info.get('params'):
+            self._run_instant()
+            return
+
         self.window = tk.Toplevel(parent)
         self.window.title(self.report_info['name'])
         self.window.resizable(False, False)
@@ -157,7 +161,25 @@ class QueryDialog:
         center_window(self.window, width, height)
         self.window.grab_set()
 
+    def _run_instant(self):
+        """Мгновенно выполняет отчёт без параметров и показывает результат."""
+        try:
+            func_name = self.report_info['func']
+            if not hasattr(self.bl, func_name):
+                raise ValueError(f"Функция {func_name} не найдена в BusinessLogic")
+
+            func = getattr(self.bl, func_name)
+            result = func()
+            ReportView(self.parent, self.report_info['name'], result)
+
+            if self.on_run:
+                self.on_run()
+
+        except Exception as e:
+            messagebox.showerror("Ошибка выполнения отчёта", str(e), parent=self.parent)
+
     def _create_widgets(self):
+        """Создаёт форму с параметрами. Для ID-полей создаёт выпадающие списки."""
 
         main_frame = ttk.Frame(self.window, padding="20")
         main_frame.pack(fill=tk.BOTH, expand=True)
@@ -166,9 +188,25 @@ class QueryDialog:
                                font=('Arial', 14, 'bold'))
         title_label.pack(pady=(0, 20))
 
+        if not self.report_info['params']:
+            info_frame = ttk.Frame(main_frame)
+            info_frame.pack(expand=True, fill=tk.BOTH)
+
+            tk.Label(info_frame, text="📊", font=('Arial', 48)).pack(pady=20)
+            tk.Label(info_frame,
+                     text="Этот отчёт не требует параметров и выполняется мгновенно.",
+                     font=('Arial', 11), fg='gray').pack(pady=10)
+            tk.Label(info_frame,
+                     text="Закройте это окно, результат уже показан на экране.",
+                     font=('Arial', 10), fg='green').pack(pady=5)
+
+            ttk.Button(info_frame, text="OK, закрыть", command=self.window.destroy,
+                       width=15).pack(pady=20)
+            return
+
+
         params_frame = ttk.Frame(main_frame)
         params_frame.pack(fill=tk.BOTH, expand=True)
-
 
         canvas = tk.Canvas(params_frame)
         scrollbar = ttk.Scrollbar(params_frame, orient='vertical', command=canvas.yview)
@@ -185,6 +223,9 @@ class QueryDialog:
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill='y')
 
+
+        self.combo_mappings = {}
+
         row = 0
         for param in self.report_info['params']:
             label = param['label']
@@ -193,16 +234,100 @@ class QueryDialog:
             required = param.get('required', False)
             default = param.get('default', '')
 
-
             param_frame = ttk.Frame(scrollable_frame)
             param_frame.pack(fill='x', pady=8)
-
 
             label_text = f"{label}{' *' if required else ':'}"
             tk.Label(param_frame, text=label_text, font=('Arial', 10),
                      width=25, anchor='e').pack(side=tk.LEFT, padx=5)
 
-            if param_type in ('date', 'timestamp'):
+
+            if name == 'room_id':
+
+                combo = ttk.Combobox(param_frame, width=40, state="readonly", font=('Arial', 10))
+                combo.pack(side=tk.LEFT, padx=5)
+
+                try:
+                    rooms = self.bl.get_all('room', limit=500)
+                    room_mapping = {}
+                    room_list = []
+
+                    for r in rooms:
+                        room_id = r['room_id']
+                        room_number = r.get('room_number', str(room_id))
+                        building_id = r.get('building_id')
+
+
+                        building_name = ""
+                        if building_id is not None:
+                            try:
+                                building = self.bl.get_by_id('building', 'building_id', building_id)
+                                if building:
+                                    building_name = building.get('name', '')
+                            except:
+                                pass
+
+
+                        if building_name:
+                            display_text = f"№{room_number} (Корпус: {building_name}, Этаж: {r.get('floor_no', '?')})"
+                        else:
+                            display_text = f"№{room_number} (ID: {room_id})"
+
+                        room_mapping[display_text] = room_id
+                        room_list.append(display_text)
+
+                    room_list.sort()
+                    combo['values'] = room_list
+                    self.combo_mappings[name] = room_mapping
+
+                    if room_list:
+                        combo.current(0)
+
+                except Exception as e:
+                    combo['values'] = [f"Ошибка загрузки: {str(e)[:50]}"]
+                    self.combo_mappings[name] = {}
+
+                self.entries[name] = (combo, 'combo', required)
+
+            elif name == 'client_id':
+                combo = ttk.Combobox(param_frame, width=40, state="readonly", font=('Arial', 10))
+                combo.pack(side=tk.LEFT, padx=5)
+
+                try:
+                    clients = self.bl.get_all('client', limit=500)
+                    client_mapping = {}
+                    client_list = []
+
+                    for c in clients:
+                        client_id = c['client_id']
+                        last_name = c.get('last_name', '')
+                        first_name = c.get('first_name', '')
+                        passport = c.get('passport_number', '')
+                        phone = c.get('phone', '')
+
+                        display_text = f"{last_name} {first_name}"
+                        if passport:
+                            display_text += f" (паспорт: {passport})"
+                        if phone:
+                            display_text += f" [тел: {phone}]"
+
+                        client_mapping[display_text] = client_id
+                        client_list.append(display_text)
+
+                    client_list.sort()
+                    combo['values'] = client_list
+                    self.combo_mappings[name] = client_mapping
+
+                    if client_list:
+                        combo.current(0)
+
+                except Exception as e:
+                    combo['values'] = [f"Ошибка загрузки: {str(e)[:50]}"]
+                    self.combo_mappings[name] = {}
+
+                self.entries[name] = (combo, 'combo', required)
+
+            elif param_type in ('date', 'timestamp'):
                 entry_frame = ttk.Frame(param_frame)
                 entry_frame.pack(side=tk.LEFT, padx=5)
 
@@ -220,25 +345,29 @@ class QueryDialog:
                 tk.Label(entry_frame, text=hint, font=('Arial', 8),
                          fg='gray').pack(side=tk.LEFT, padx=5)
 
+                self.entries[name] = (entry, param_type, required)
+
             elif param_type == 'int':
                 entry = ttk.Entry(param_frame, width=30, font=('Arial', 10))
                 entry.pack(side=tk.LEFT, padx=5)
                 if default:
                     entry.insert(0, str(default))
+                self.entries[name] = (entry, param_type, required)
 
             elif param_type == 'str':
                 entry = ttk.Entry(param_frame, width=30, font=('Arial', 10))
                 entry.pack(side=tk.LEFT, padx=5)
                 if default:
                     entry.insert(0, default)
+                self.entries[name] = (entry, param_type, required)
 
             else:
                 entry = ttk.Entry(param_frame, width=30, font=('Arial', 10))
                 entry.pack(side=tk.LEFT, padx=5)
                 if default:
                     entry.insert(0, str(default))
+                self.entries[name] = (entry, param_type, required)
 
-            self.entries[name] = (entry, param_type, required)
             row += 1
 
         btn_frame = ttk.Frame(main_frame)
@@ -249,18 +378,30 @@ class QueryDialog:
         ttk.Button(btn_frame, text="✖ Отмена", command=self.window.destroy,
                    width=15).pack(side='left', padx=10)
 
-        if not self.report_info['params']:
-            info_label = tk.Label(scrollable_frame,
-                                  text="Этот отчёт не требует параметров.\nНажмите 'Выполнить' для просмотра результата.",
-                                  font=('Arial', 10), fg='green', justify='center')
-            info_label.pack(pady=20)
 
     def _run(self):
         """Выполнить отчёт с введёнными параметрами."""
         try:
             kwargs = {}
 
-            for name, (entry, param_type, required) in self.entries.items():
+            for name, entry_data in self.entries.items():
+                entry, param_type, required = entry_data
+
+
+                if param_type == 'combo':
+                    selected_text = entry.get()
+                    if required and not selected_text:
+                        raise ValueError(f"Параметр '{name}' обязателен для заполнения")
+
+                    mapping = self.combo_mappings.get(name, {})
+                    value = mapping.get(selected_text)
+
+                    if required and value is None:
+                        raise ValueError(f"Не удалось определить значение для '{name}'")
+
+                    kwargs[name] = value
+                    continue
+
                 value = entry.get().strip()
 
                 if required and not value:
@@ -300,6 +441,7 @@ class QueryDialog:
 
             self.window.destroy()
 
+            from gui.report_view import ReportView
             ReportView(self.parent, self.report_info['name'], result)
 
             if self.on_run:
